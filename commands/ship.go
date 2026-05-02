@@ -19,7 +19,7 @@ func (r *ShipCommand) Signature() string {
 }
 
 func (r *ShipCommand) Description() string {
-	return "Docker image build qilib serverga yuklaydi"
+	return "Docker builds the image and uploads it to the server."
 }
 
 func (r *ShipCommand) Extend() command.Extend {

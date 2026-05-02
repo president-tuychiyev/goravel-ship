@@ -19,7 +19,7 @@ func (r *InstallCommand) Signature() string {
 }
 
 func (r *InstallCommand) Description() string {
-	return "goravel-ship uchun kerakli fayllarni loyihaga qo'shadi"
+	return "adds the necessary files for goravel-ship to the project"
 }
 
 func (r *InstallCommand) Extend() command.Extend {
@@ -35,25 +35,25 @@ func (r *InstallCommand) Handle(ctx console.Context) error {
 
 	for stub, dest := range files {
 		if _, err := os.Stat(dest); err == nil {
-			ctx.Warning(fmt.Sprintf("'%s' allaqachon mavjud, o'tkazib yuborildi", dest))
+			ctx.Warning(fmt.Sprintf("'%s' already exists, skipping", dest))
 			continue
 		}
 
 		data, err := stubs.ReadFile(stub)
 		if err != nil {
-			ctx.Error(fmt.Sprintf("'%s' o'qib bo'lmadi: %v", stub, err))
+			ctx.Error(fmt.Sprintf("'%s' could not be read: %v", stub, err))
 			return err
 		}
 
 		if err := os.WriteFile(dest, data, 0644); err != nil {
-			ctx.Error(fmt.Sprintf("'%s' yozib bo'lmadi: %v", dest, err))
+			ctx.Error(fmt.Sprintf("'%s' could not be written: %v", dest, err))
 			return err
 		}
 
-		ctx.Info(fmt.Sprintf("✓ %s yaratildi", dest))
+		ctx.Info(fmt.Sprintf("✓ %s created", dest))
 	}
 
 	ctx.NewLine()
-	ctx.Success("goravel-ship o'rnatildi! .env.prod.example ni tahrirlang va artisan ship ni ishga tushiring.")
+	ctx.Success("goravel-ship installed! Edit .env.prod.example and run artisan ship.")
 	return nil
 }
