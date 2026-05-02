@@ -1,0 +1,17 @@
+services:
+  app:
+    image: app:${IMAGE_TAG:-latest}
+    container_name: app
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./storage:/app/storage
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    external: true
