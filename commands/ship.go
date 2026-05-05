@@ -19,7 +19,7 @@ func (r *ShipCommand) Signature() string {
 }
 
 func (r *ShipCommand) Description() string {
-	return "Docker builds the image and uploads it to the server."
+	return "Build a Docker image locally and ship it to a remote server over SSH"
 }
 
 func (r *ShipCommand) Extend() command.Extend {
@@ -51,17 +51,17 @@ func (r *ShipCommand) Extend() command.Extend {
 			&command.StringFlag{
 				Name:    "image",
 				Aliases: []string{"i"},
-				Usage:   "Docker image name",
+				Usage:   "Docker image name (auto-detected from go.mod if omitted)",
 			},
 			&command.StringFlag{
 				Name:    "container",
 				Aliases: []string{"c"},
-				Usage:   "Docker container name",
+				Usage:   "Docker container name (defaults to image name)",
 			},
 			&command.StringFlag{
 				Name:    "binary",
 				Aliases: []string{"b"},
-				Usage:   "Binary path inside container",
+				Usage:   "Binary path inside the container",
 				Value:   "/usr/local/bin/app",
 			},
 			&command.IntFlag{
@@ -73,12 +73,12 @@ func (r *ShipCommand) Extend() command.Extend {
 			&command.BoolFlag{
 				Name:    "migrate",
 				Aliases: []string{"m"},
-				Usage:   "Run migrations after deploy",
+				Usage:   "Run database migrations after deploy",
 			},
 			&command.BoolFlag{
 				Name:    "seed",
 				Aliases: []string{"s"},
-				Usage:   "Run seeders after deploy",
+				Usage:   "Run database seeders after deploy",
 			},
 		},
 	}
@@ -129,7 +129,7 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	}
 
 	ctx.NewLine()
-	ctx.Success("Ship muvaffaqiyatli yakunlandi!")
+	ctx.Success("Shipped successfully!")
 	return nil
 }
 
@@ -160,13 +160,13 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		return run(ctx, "scp", append(args, files...)...)
 	}
 
-	// .env.prod.example → .env
+	// Always rebuild .env from .env.prod.example
 	if err := copyFile(".env.prod.example", ".env"); err != nil {
-		return fmt.Errorf(".env.prod.example topilmadi: %w", err)
+		return fmt.Errorf(".env.prod.example not found: %w", err)
 	}
 	ctx.Info(".env.prod.example → .env")
 
-	// Docker build
+	// Build Docker image
 	if err := run(ctx, "docker", "build", "-t", imageTagged, "."); err != nil {
 		return err
 	}
@@ -176,56 +176,56 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		}
 	}
 
-	// Image saqlash
-	ctx.Info(fmt.Sprintf(">>> Save → %s", tarGz))
+	// Save image to tar.gz
+	ctx.Info(fmt.Sprintf(">>> Saving image → %s", tarGz))
 	if err := saveImage(imageTagged, tarGz); err != nil {
-		return fmt.Errorf("save xatosi: %w", err)
+		return fmt.Errorf("failed to save image: %w", err)
 	}
 
-	// Remote papka
-	if err := ssh(fmt.Sprintf("mkdir -p %s", path)); err != nil {
+	// Create remote directory
+	if err := ssh(fmt.Sprintf("sudo mkdir -p %s && sudo chown -R $(whoami):$(whoami) %s", path, path)); err != nil {
 		return err
 	}
 
-	// SCP: tar.gz, .env, deploy.sh
+	// Upload: tar.gz, .env, deploy.sh
 	scpFiles := []string{tarGz, ".env"}
 	if _, err := os.Stat("deploy.sh"); err == nil {
 		scpFiles = append(scpFiles, "deploy.sh")
 	} else {
-		ctx.Warning("'deploy.sh' topilmadi, o'tkazib yuborildi")
+		ctx.Warning("'deploy.sh' not found, skipping")
 	}
 	scpFiles = append(scpFiles, fmt.Sprintf("%s:%s/", target, path))
 	if err := scp(scpFiles...); err != nil {
 		return err
 	}
 
-	// docker-compose-prod.yml → docker-compose.yml
+	// Upload docker-compose-prod.yml as docker-compose.yml on the server
 	if _, err := os.Stat("docker-compose-prod.yml"); err == nil {
 		dest := fmt.Sprintf("%s:%s/docker-compose.yml", target, path)
 		if err := scp("docker-compose-prod.yml", dest); err != nil {
 			return err
 		}
 	} else {
-		ctx.Warning("'docker-compose-prod.yml' topilmadi, o'tkazib yuborildi")
+		ctx.Warning("'docker-compose-prod.yml' not found, skipping")
 	}
 
-	// deploy.sh ishga tushirish
-	if err := ssh(fmt.Sprintf("cd %s && bash deploy.sh %s", path, tarGz)); err != nil {
+	// Run deploy.sh on the server
+	if err := ssh(fmt.Sprintf("cd %s && sudo bash deploy.sh %s", path, tarGz)); err != nil {
 		return err
 	}
 
-	// Migrate
+	// Run migrations
 	if migrate {
-		ctx.Info(">>> Migrating...")
-		if err := ssh(fmt.Sprintf("docker exec %s %s artisan migrate", containerName, binaryPath)); err != nil {
+		ctx.Info(">>> Running migrations...")
+		if err := ssh(fmt.Sprintf("sudo docker exec %s %s artisan migrate", containerName, binaryPath)); err != nil {
 			return err
 		}
 	}
 
-	// Seed
+	// Run seeders
 	if seed {
-		ctx.Info(">>> Seeding...")
-		if err := ssh(fmt.Sprintf("docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
+		ctx.Info(">>> Running seeders...")
+		if err := ssh(fmt.Sprintf("sudo docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
 			return err
 		}
 	}
