@@ -1,6 +1,6 @@
 services:
   app:
-    image: app:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAME:-app}:${IMAGE_TAG:-latest}
     container_name: app
     restart: unless-stopped
     env_file:

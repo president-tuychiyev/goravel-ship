@@ -209,8 +209,8 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		ctx.Warning("'docker-compose-prod.yml' not found, skipping")
 	}
 
-	// Run deploy.sh on the server
-	if err := ssh(fmt.Sprintf("cd %s && bash deploy.sh %s", path, tarGz)); err != nil {
+	// Run deploy.sh on the server — pass IMAGE_NAME so compose uses the correct local image
+	if err := ssh(fmt.Sprintf("cd %s && IMAGE_NAME=%s bash deploy.sh %s", path, imageName, tarGz)); err != nil {
 		return err
 	}
 

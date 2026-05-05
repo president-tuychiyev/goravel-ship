@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 TAR_FILE="${1:-}"
+IMAGE_NAME="${IMAGE_NAME:-app}"
 
 if [ -z "${TAR_FILE}" ]; then
   echo "ERROR: tar.gz file name required." >&2
@@ -31,7 +32,7 @@ echo ">>> Loading image: ${TAR_FILE}"
 gunzip -c "${TAR_FILE}" | docker load
 
 echo ">>> Restarting container"
-docker compose -f docker-compose.yml up -d
+IMAGE_NAME="${IMAGE_NAME}" docker compose -f docker-compose.yml up -d
 
 echo ">>> Cleaning up old (dangling) images"
 docker image prune -f
