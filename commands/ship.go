@@ -76,6 +76,10 @@ func (r *ShipCommand) Extend() command.Extend {
 				Usage:   "Run database migrations after deploy",
 			},
 			&command.BoolFlag{
+				Name:  "fresh",
+				Usage: "Drop all tables and re-run migrations (use with --migrate)",
+			},
+			&command.BoolFlag{
 				Name:    "seed",
 				Aliases: []string{"s"},
 				Usage:   "Run database seeders after deploy",
@@ -94,6 +98,7 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	binaryPath := ctx.Option("binary")
 	port := ctx.OptionInt("port")
 	migrate := ctx.OptionBool("migrate")
+	fresh := ctx.OptionBool("fresh")
 	seed := ctx.OptionBool("seed")
 
 	if imageName == "" {
@@ -116,10 +121,11 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	ctx.Info(fmt.Sprintf("Image     : %s", imageTagged))
 	ctx.Info(fmt.Sprintf("Container : %s", containerName))
 	ctx.Info(fmt.Sprintf("Migrate   : %v", migrate))
+	ctx.Info(fmt.Sprintf("Fresh     : %v", fresh))
 	ctx.Info(fmt.Sprintf("Seed      : %v", seed))
 	ctx.Divider()
 
-	err := deploy(ctx, target, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz, migrate, seed)
+	err := deploy(ctx, target, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz, migrate, fresh, seed)
 
 	os.Remove(tarGz)
 
@@ -133,7 +139,7 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	return nil
 }
 
-func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz string, migrate, seed bool) error {
+func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz string, migrate, fresh, seed bool) error {
 	controlPath := fmt.Sprintf("/tmp/ship_ctl_%s", tarGz[:8])
 	defer exec.Command("ssh",
 		"-o", fmt.Sprintf("ControlPath=%s", controlPath),
@@ -216,8 +222,12 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 
 	// Run migrations
 	if migrate {
-		ctx.Info(">>> Running migrations...")
-		if err := ssh(fmt.Sprintf("docker exec %s %s artisan migrate", containerName, binaryPath)); err != nil {
+		migrateCmd := "migrate"
+		if fresh {
+			migrateCmd = "migrate:fresh"
+		}
+		ctx.Info(fmt.Sprintf(">>> Running artisan %s...", migrateCmd))
+		if err := ssh(fmt.Sprintf("docker exec %s %s artisan %s", containerName, binaryPath, migrateCmd)); err != nil {
 			return err
 		}
 	}
