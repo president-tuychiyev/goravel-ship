@@ -140,8 +140,21 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		"-O", "exit", target,
 	).Run()
 
+	// ssh runs a remote command without TTY (for non-sudo commands)
 	ssh := func(cmd string) error {
 		return run(ctx, "ssh",
+			"-p", portStr,
+			"-o", "ControlMaster=auto",
+			"-o", fmt.Sprintf("ControlPath=%s", controlPath),
+			"-o", "ControlPersist=300",
+			target, cmd,
+		)
+	}
+
+	// ssht runs a remote command with TTY allocated — required for sudo
+	ssht := func(cmd string) error {
+		return run(ctx, "ssh",
+			"-tt",
 			"-p", portStr,
 			"-o", "ControlMaster=auto",
 			"-o", fmt.Sprintf("ControlPath=%s", controlPath),
@@ -182,8 +195,8 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		return fmt.Errorf("failed to save image: %w", err)
 	}
 
-	// Create remote directory
-	if err := ssh(fmt.Sprintf("sudo mkdir -p %s && sudo chown -R $(whoami):$(whoami) %s", path, path)); err != nil {
+	// Create remote directory (no sudo needed — user owns their home dir)
+	if err := ssh(fmt.Sprintf("mkdir -p %s", path)); err != nil {
 		return err
 	}
 
@@ -209,15 +222,15 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		ctx.Warning("'docker-compose-prod.yml' not found, skipping")
 	}
 
-	// Run deploy.sh on the server
-	if err := ssh(fmt.Sprintf("cd %s && sudo bash deploy.sh %s", path, tarGz)); err != nil {
+	// Run deploy.sh on the server (sudo for docker commands inside)
+	if err := ssht(fmt.Sprintf("cd %s && sudo bash deploy.sh %s", path, tarGz)); err != nil {
 		return err
 	}
 
 	// Run migrations
 	if migrate {
 		ctx.Info(">>> Running migrations...")
-		if err := ssh(fmt.Sprintf("sudo docker exec %s %s artisan migrate", containerName, binaryPath)); err != nil {
+		if err := ssht(fmt.Sprintf("sudo docker exec %s %s artisan migrate", containerName, binaryPath)); err != nil {
 			return err
 		}
 	}
@@ -225,7 +238,7 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 	// Run seeders
 	if seed {
 		ctx.Info(">>> Running seeders...")
-		if err := ssh(fmt.Sprintf("sudo docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
+		if err := ssht(fmt.Sprintf("sudo docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
 			return err
 		}
 	}
