@@ -84,6 +84,10 @@ func (r *ShipCommand) Extend() command.Extend {
 				Aliases: []string{"s"},
 				Usage:   "Run database seeders after deploy",
 			},
+			&command.BoolFlag{
+				Name:  "root",
+				Usage: "Run privileged remote commands with sudo (passwordless sudo required)",
+			},
 		},
 	}
 }
@@ -100,6 +104,7 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	migrate := ctx.OptionBool("migrate")
 	fresh := ctx.OptionBool("fresh")
 	seed := ctx.OptionBool("seed")
+	root := ctx.OptionBool("root")
 
 	if imageName == "" {
 		imageName = detectImageName()
@@ -123,9 +128,10 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	ctx.Info(fmt.Sprintf("Migrate   : %v", migrate))
 	ctx.Info(fmt.Sprintf("Fresh     : %v", fresh))
 	ctx.Info(fmt.Sprintf("Seed      : %v", seed))
+	ctx.Info(fmt.Sprintf("Root      : %v", root))
 	ctx.Divider()
 
-	err := deploy(ctx, target, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz, migrate, fresh, seed)
+	err := deploy(ctx, target, user, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz, migrate, fresh, seed, root)
 
 	os.Remove(tarGz)
 
@@ -139,22 +145,29 @@ func (r *ShipCommand) Handle(ctx console.Context) error {
 	return nil
 }
 
-func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz string, migrate, fresh, seed bool) error {
+func deploy(ctx console.Context, target, user, portStr, path, tag, imageTagged, imageName, containerName, binaryPath, tarGz string, migrate, fresh, seed, root bool) error {
 	controlPath := fmt.Sprintf("/tmp/ship_ctl_%s", tarGz[:8])
 	defer exec.Command("ssh",
 		"-o", fmt.Sprintf("ControlPath=%s", controlPath),
 		"-O", "exit", target,
 	).Run()
 
-	ssh := func(cmd string) error {
-		return run(ctx, "ssh",
+	sshExec := func(cmd string, asRoot bool) error {
+		args := []string{
 			"-p", portStr,
 			"-o", "ControlMaster=auto",
 			"-o", fmt.Sprintf("ControlPath=%s", controlPath),
 			"-o", "ControlPersist=300",
-			target, cmd,
-		)
+		}
+		if root && asRoot {
+			args = append(args, "-tt")
+			cmd = "sudo " + cmd
+		}
+		args = append(args, target, cmd)
+		return run(ctx, "ssh", args...)
 	}
+	ssh := func(cmd string) error { return sshExec(cmd, false) }
+	sshRoot := func(cmd string) error { return sshExec(cmd, true) }
 
 	scp := func(files ...string) error {
 		args := []string{
@@ -188,9 +201,15 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 		return fmt.Errorf("failed to save image: %w", err)
 	}
 
-	// Create remote directory (no sudo needed — user owns their home dir)
-	if err := ssh(fmt.Sprintf("mkdir -p %s", path)); err != nil {
-		return err
+	// Create remote directory. With --root, chown to the SSH user so scp can upload.
+	if root {
+		if err := sshRoot(fmt.Sprintf("mkdir -p %s && chown -R %s: %s", path, user, path)); err != nil {
+			return err
+		}
+	} else {
+		if err := ssh(fmt.Sprintf("mkdir -p %s", path)); err != nil {
+			return err
+		}
 	}
 
 	// Upload: tar.gz, .env, deploy.sh
@@ -216,7 +235,7 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 	}
 
 	// Run deploy.sh on the server — pass IMAGE_NAME so compose uses the correct local image
-	if err := ssh(fmt.Sprintf("cd %s && IMAGE_NAME=%s bash deploy.sh %s", path, imageName, tarGz)); err != nil {
+	if err := sshRoot(fmt.Sprintf("cd %s && IMAGE_NAME=%s bash deploy.sh %s", path, imageName, tarGz)); err != nil {
 		return err
 	}
 
@@ -227,7 +246,7 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 			migrateCmd = "migrate:fresh"
 		}
 		ctx.Info(fmt.Sprintf(">>> Running artisan %s...", migrateCmd))
-		if err := ssh(fmt.Sprintf("docker exec %s %s artisan %s", containerName, binaryPath, migrateCmd)); err != nil {
+		if err := sshRoot(fmt.Sprintf("docker exec %s %s artisan %s", containerName, binaryPath, migrateCmd)); err != nil {
 			return err
 		}
 	}
@@ -235,7 +254,7 @@ func deploy(ctx console.Context, target, portStr, path, tag, imageTagged, imageN
 	// Run seeders
 	if seed {
 		ctx.Info(">>> Running seeders...")
-		if err := ssh(fmt.Sprintf("docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
+		if err := sshRoot(fmt.Sprintf("docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
 			return err
 		}
 	}
