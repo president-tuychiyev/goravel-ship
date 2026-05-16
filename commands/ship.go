@@ -254,7 +254,7 @@ func deploy(ctx console.Context, target, user, portStr, path, tag, imageTagged, 
 	// Run seeders
 	if seed {
 		ctx.Info(">>> Running seeders...")
-		if err := sshRoot(fmt.Sprintf("docker exec %s %s artisan db:seed", containerName, binaryPath)); err != nil {
+		if err := sshRoot(fmt.Sprintf("docker exec %s %s artisan db:seed --force", containerName, binaryPath)); err != nil {
 			return err
 		}
 	}
